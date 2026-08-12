@@ -3,125 +3,30 @@ from __future__ import annotations
 
 import argparse
 import base64
-from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import random
 import re
 import shutil
 import time
 from typing import Any
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
+
+from app.detector import (
+    DetectContractError,
+    DetectResponseError,
+    sanitized_response_body,
+    select_teacher_candidate,
+    validate_detect_response,
+)
+from app.imaging import build_display_text, render_labeled_preview
 
 
 LABEL_TO_CLASS_ID = {"sit": 0, "stand": 1, "bbwriting": 2, "teach": 3}
 LABEL_ORDER = ["sit", "stand", "bbwriting", "teach"]
-SUPPORTED_API_LABELS = {
-    201: "站立",
-    202: "坐着",
-    203: "板书",
-    205: "授课",
-}
-API_LABEL_TO_VLM_LABEL = {
-    "站立": "stand",
-    "坐着": "sit",
-    "板书": "bbwriting",
-    "授课": "teach",
-}
-DISPLAY_LABELS = {
-    "sit": "sit 坐",
-    "stand": "stand 站",
-    "bbwriting": "bbwriting 写板书",
-    "teach": "teach 讲授演示",
-}
-FONT_CANDIDATES = [
-    "/System/Library/Fonts/STHeiti Medium.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/Library/Fonts/Arial Unicode.ttf",
-]
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
-
-
-@dataclass
-class TeacherCandidate:
-    box_xyxy: list[int]
-    source_api_labels: list[str]
-    source_api_object_types: list[int]
-
-
-def normalize_box(raw_box: dict[str, Any], width: int, height: int) -> list[int] | None:
-    x1 = int(round(raw_box.get("LeftTopX", 0)))
-    y1 = int(round(raw_box.get("LeftTopY", 0)))
-    x2 = int(round(raw_box.get("RightBtmX", 0)))
-    y2 = int(round(raw_box.get("RightBtmY", 0)))
-    x1, x2 = sorted((max(0, min(width - 1, x1)), max(0, min(width - 1, x2))))
-    y1, y2 = sorted((max(0, min(height - 1, y1)), max(0, min(height - 1, y2))))
-    if x2 <= x1 or y2 <= y1:
-        return None
-    return [x1, y1, x2, y2]
-
-
-def box_area(box: list[int]) -> int:
-    x1, y1, x2, y2 = box
-    return (x2 - x1) * (y2 - y1)
-
-
-def box_iou(a: list[int], b: list[int]) -> float:
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
-    inter = iw * ih
-    if inter == 0:
-        return 0.0
-    return inter / (box_area(a) + box_area(b) - inter)
-
-
-def merge_candidate_boxes(raw_candidates: list[tuple[list[int], int]]) -> list[dict[str, Any]]:
-    groups: list[dict[str, Any]] = []
-    for box, object_type in raw_candidates:
-        match = None
-        for group in groups:
-            if box_iou(box, group["box"]) >= 0.85:
-                match = group
-                break
-        if match is None:
-            groups.append({"box": box, "boxes": [box], "object_types": {object_type}})
-        else:
-            match["boxes"].append(box)
-            match["object_types"].add(object_type)
-            match["box"] = max(match["boxes"], key=box_area)
-    return groups
-
-
-def select_teacher_candidate(
-    result_item: dict[str, Any], width: int, height: int
-) -> TeacherCandidate | None:
-    raw_candidates: list[tuple[list[int], int]] = []
-    for item in result_item.get("ResultList") or []:
-        object_type = item.get("ObjectType")
-        if object_type not in SUPPORTED_API_LABELS:
-            continue
-        for raw_box in item.get("ObjectPostList") or []:
-            box = normalize_box(raw_box, width, height)
-            if box is not None:
-                raw_candidates.append((box, object_type))
-
-    groups = merge_candidate_boxes(raw_candidates)
-    if not groups:
-        return None
-
-    selected = min(groups, key=lambda group: (group["box"][1], -box_area(group["box"])))
-    object_types = sorted(selected["object_types"])
-    return TeacherCandidate(
-        box_xyxy=selected["box"],
-        source_api_labels=[SUPPORTED_API_LABELS[t] for t in object_types],
-        source_api_object_types=object_types,
-    )
 
 
 def normalize_xyxy_to_yolo(box_xyxy: list[int], width: int, height: int) -> list[float]:
@@ -156,9 +61,9 @@ def ordered_labels(labels: list[str]) -> list[str]:
 
 
 def fallback_pose_from_source(source_api_labels: list[str]) -> str:
-    if "坐着" in source_api_labels:
+    if "sit" in source_api_labels or "坐着" in source_api_labels:
         return "sit"
-    if "站立" in source_api_labels:
+    if "stand" in source_api_labels or "站立" in source_api_labels:
         return "stand"
     return "stand"
 
@@ -213,95 +118,6 @@ def image_to_data_url(path: Path) -> str:
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def find_font_path() -> str:
-    for path in FONT_CANDIDATES:
-        if Path(path).exists():
-            return path
-    raise RuntimeError("No Chinese-capable font found")
-
-
-def text_size(draw: ImageDraw.ImageDraw, lines: list[str], font: ImageFont.FreeTypeFont, spacing: int) -> tuple[int, int]:
-    stroke = max(1, font.size // 18)
-    widths = []
-    heights = []
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=stroke)
-        widths.append(bbox[2] - bbox[0])
-        heights.append(bbox[3] - bbox[1])
-    return (max(widths) if widths else 0, sum(heights) + spacing * max(0, len(lines) - 1))
-
-
-def fit_font(
-    draw: ImageDraw.ImageDraw,
-    font_path: str,
-    lines: list[str],
-    target_width: float,
-    max_height: float,
-) -> ImageFont.FreeTypeFont:
-    lo, hi = 4, 160
-    best = 4
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        font = ImageFont.truetype(font_path, size=mid)
-        spacing = max(1, mid // 8)
-        width, height = text_size(draw, lines, font, spacing)
-        if width <= target_width and height <= max_height:
-            best = mid
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return ImageFont.truetype(font_path, size=best)
-
-
-def draw_box_only(src_path: Path, out_path: Path, box_xyxy: list[int] | None) -> None:
-    image = Image.open(src_path).convert("RGB")
-    if box_xyxy is not None:
-        draw = ImageDraw.Draw(image)
-        width, height = image.size
-        line_width = max(4, min(width, height) // 180)
-        draw.rectangle(box_xyxy, outline=RED, width=line_width)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(out_path, quality=95)
-
-
-def draw_review_image(
-    src_path: Path,
-    out_path: Path,
-    box_xyxy: list[int] | None,
-    labels: list[str],
-    font_path: str,
-) -> None:
-    image = Image.open(src_path).convert("RGB")
-    draw = ImageDraw.Draw(image)
-    width, height = image.size
-    if box_xyxy is not None:
-        x1, y1, x2, y2 = box_xyxy
-        box_width = x2 - x1
-        box_height = y2 - y1
-        line_width = max(4, min(width, height) // 180)
-        draw.rectangle(box_xyxy, outline=RED, width=line_width)
-        lines = [DISPLAY_LABELS[label] for label in labels]
-        if lines:
-            font = fit_font(draw, font_path, lines, target_width=box_width / 2, max_height=box_height * 0.8)
-            spacing = max(1, font.size // 8)
-            label_width, label_height = text_size(draw, lines, font, spacing)
-            tx = (x1 + x2) / 2 - label_width / 2
-            ty = (y1 + y2) / 2 - label_height / 2
-            stroke = max(1, font.size // 18)
-            draw.multiline_text(
-                (tx, ty),
-                "\n".join(lines),
-                font=font,
-                fill=BLUE,
-                spacing=spacing,
-                align="center",
-                stroke_width=stroke,
-                stroke_fill=BLUE,
-            )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(out_path, quality=95)
-
-
 def post_json_with_retries(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: int = 90) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(3):
@@ -309,34 +125,113 @@ def post_json_with_retries(url: str, payload: dict[str, Any], headers: dict[str,
             response = requests.post(url, json=payload, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 return response.json()
-            last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:500]}")
+            last_error = RuntimeError(
+                f"HTTP {response.status_code}: {sanitized_response_body(response.text)}"
+            )
         except Exception as exc:  # noqa: BLE001
             last_error = exc
         time.sleep(1.5 * (attempt + 1))
     raise RuntimeError(f"POST failed after retries: {last_error}")
 
 
-def detect_teacher_batch(paths: list[Path], detect_url: str) -> dict[str, dict[str, Any]]:
+def post_detect_json_with_retries(
+    url: str,
+    payload: dict[str, Any],
+    timeout: int = 90,
+) -> dict[str, Any]:
+    for attempt in range(3):
+        try:
+            response = requests.post(url, json=payload, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt == 2:
+                raise DetectResponseError(f"teacher detect failed after 3 attempts: {exc}") from exc
+            time.sleep(float(2**attempt) + random.uniform(0.0, 0.5))
+            continue
+
+        if 200 <= response.status_code < 300:
+            try:
+                return response.json()
+            except (TypeError, ValueError) as exc:
+                raise DetectResponseError("teacher detect returned invalid JSON") from exc
+
+        body = sanitized_response_body(response.text)
+        if response.status_code not in {429, 500, 503}:
+            raise DetectResponseError(
+                f"teacher detect failed: HTTP {response.status_code}: {body}"
+            )
+        if attempt == 2:
+            raise DetectResponseError(
+                f"teacher detect failed after 3 attempts: HTTP {response.status_code}: {body}"
+            )
+
+        retry_after = response.headers.get("Retry-After")
+        try:
+            delay = max(0.0, min(30.0, float(retry_after))) if retry_after is not None else None
+        except ValueError:
+            delay = None
+        time.sleep(delay if delay is not None else float(2**attempt) + random.uniform(0.0, 0.5))
+
+    raise DetectResponseError("teacher detect failed after 3 attempts")
+
+
+def detect_teacher_batch(paths: list[Path], detect_url: str) -> dict[Path, dict[str, Any]]:
+    image_ids = {
+        path: f"offline-{index:04d}-{path.name}"
+        for index, path in enumerate(paths)
+    }
     payload = {
+        "batch_id": f"offline-{paths[0].stem}" if paths else "offline-empty",
+        "stream_type": "teacher",
+        "ReturnHeadPose": False,
         "ImageList": [
-            {"StoragePath": image_to_data_url(path), "ImageId": path.stem}
+            {"StoragePath": image_to_data_url(path), "ImageId": image_ids[path]}
             for path in paths
         ]
     }
-    data = post_json_with_retries(detect_url, payload, timeout=90)
-    status = data.get("StatusObject") or {}
-    if status.get("StatusCode") != 0:
-        raise RuntimeError(f"ImageDetect failed: {json.dumps(status, ensure_ascii=False)}")
+    data = post_detect_json_with_retries(detect_url, payload, timeout=90)
     result_by_id = {}
-    for item in data.get("DataList") or []:
-        image_id = (item.get("StatusObject") or {}).get("ImageId")
-        if image_id:
-            result_by_id[image_id] = item
+    expected_image_ids = set(image_ids.values())
+    for path in paths:
+        result_item = validate_detect_response(
+            data,
+            image_ids[path],
+            expected_image_ids=expected_image_ids,
+        )
+        result_by_id[path] = {
+            "result_item": result_item,
+            "root_status": data.get("StatusObject"),
+            "image_status": result_item.get("StatusObject"),
+        }
     return result_by_id
 
 
+def build_output_names(paths: list[Path]) -> dict[Path, Path]:
+    stem_counts: dict[str, int] = {}
+    for path in paths:
+        stem_counts[path.stem] = stem_counts.get(path.stem, 0) + 1
+    return {
+        path: (
+            Path(f"{path.stem}-{path.suffix.lower().lstrip('.')}{path.suffix.lower()}")
+            if stem_counts[path.stem] > 1
+            else Path(path.name)
+        )
+        for path in paths
+    }
+
+
+def select_candidate_for_offline(
+    result_item: dict[str, Any],
+    width: int,
+    height: int,
+) -> tuple[Any | None, str]:
+    try:
+        return select_teacher_candidate(result_item, width=width, height=height), ""
+    except DetectContractError as exc:
+        return None, str(exc)
+
+
 def build_vlm_prompt(source_api_labels: list[str]) -> str:
-    source = "、".join(source_api_labels) if source_api_labels else "无"
+    source = build_display_text(source_api_labels) or "无"
     return f"""
 你是课堂图片数据标注员。请只判断红色框内的老师主体，不要判断其他学生或背景。
 
@@ -346,7 +241,7 @@ def build_vlm_prompt(source_api_labels: list[str]) -> str:
 - bbwriting：写板书
 - teach：讲授演示
 
-候选 API 标签是：{source}。候选标签可能错误，只能作为参考，必须以图片视觉内容为准。
+红框上方的中文初检候选标签是：{source}。候选标签可能错误或遗漏，必须以图片视觉内容为准进行保留、删除或补充。
 
 标注规则：
 1. sit 与 stand 互斥，必须且只能选择其中一个。
@@ -419,6 +314,7 @@ def process_images(args: argparse.Namespace) -> None:
     images_dir = dataset_dir / "images"
     yolo_dir = dataset_dir / "labels"
     raw_vlm_dir = dataset_dir / "raw_vlm"
+    raw_detector_dir = dataset_dir / "raw_detector"
     annotations_path = dataset_dir / "annotations.jsonl"
     classes_path = dataset_dir / "classes.txt"
 
@@ -427,7 +323,15 @@ def process_images(args: argparse.Namespace) -> None:
             if directory.exists():
                 shutil.rmtree(directory)
 
-    for directory in [dataset_dir, review_dir, preview_dir, images_dir, yolo_dir, raw_vlm_dir]:
+    for directory in [
+        dataset_dir,
+        review_dir,
+        preview_dir,
+        images_dir,
+        yolo_dir,
+        raw_vlm_dir,
+        raw_detector_dir,
+    ]:
         directory.mkdir(parents=True, exist_ok=True)
     classes_path.write_text("\n".join(LABEL_ORDER) + "\n", encoding="utf-8")
 
@@ -435,13 +339,13 @@ def process_images(args: argparse.Namespace) -> None:
     if not api_key:
         raise RuntimeError(f"Missing API key env var: {args.api_key_env}")
 
-    font_path = find_font_path()
     image_paths = sorted(
         path for path in src_dir.iterdir()
         if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
     )
     if args.limit:
         image_paths = image_paths[: args.limit]
+    output_names = build_output_names(image_paths)
 
     annotations: list[dict[str, Any]] = []
     start = time.time()
@@ -454,31 +358,59 @@ def process_images(args: argparse.Namespace) -> None:
         results = detect_teacher_batch(batch, args.detect_url)
 
         for image_path in batch:
+            output_name = output_names[image_path]
             with Image.open(image_path) as image:
                 width, height = image.size
-            dataset_image_path = images_dir / image_path.name
+            dataset_image_path = images_dir / output_name
             shutil.copy2(image_path, dataset_image_path)
 
-            result_item = results.get(image_path.stem)
-            candidate = select_teacher_candidate(result_item or {}, width=width, height=height)
+            detect_result = results.get(image_path) or {}
+            result_item = detect_result.get("result_item")
+            candidate, detector_error = select_candidate_for_offline(
+                result_item or {}, width=width, height=height
+            )
             box_xyxy = candidate.box_xyxy if candidate else None
-            source_api_labels = candidate.source_api_labels if candidate else []
-            source_api_object_types = candidate.source_api_object_types if candidate else []
+            source_api_labels = candidate.labels if candidate else []
+            source_api_object_types = candidate.object_types if candidate else []
             normalized_box = normalize_xyxy_to_yolo(box_xyxy, width, height) if box_xyxy else None
 
-            preview_path = preview_dir / image_path.name
-            review_path = review_dir / image_path.name
-            draw_box_only(image_path, preview_path, box_xyxy)
+            preview_path = preview_dir / output_name
+            review_path = review_dir / output_name
 
             if box_xyxy is None:
-                parsed = {"labels": [], "needs_review": True, "reason": "未检测到候选老师框", "raw_json": {}}
+                reason = (
+                    f"检测契约不匹配：{detector_error}"
+                    if detector_error
+                    else "未检测到候选老师框"
+                )
+                parsed = {"labels": [], "needs_review": True, "reason": reason, "raw_json": {}}
                 raw_response = {}
                 raw_text = ""
             else:
+                render_labeled_preview(image_path, preview_path, box_xyxy, source_api_labels)
                 raw_response, raw_text = call_vlm(preview_path, source_api_labels, args.ark_url, args.model, api_key)
                 parsed = parse_vlm_labels(raw_text, source_api_labels)
+                parsed["needs_review"] = (
+                    parsed["needs_review"]
+                    or candidate.needs_review
+                    or set(source_api_labels) != set(parsed["labels"])
+                )
 
-            raw_vlm_path = raw_vlm_dir / f"{image_path.stem}.json"
+            raw_detector_path = raw_detector_dir / f"{output_name.stem}.json"
+            raw_detector_path.write_text(
+                json.dumps(
+                    {
+                        "root_status": detect_result.get("root_status"),
+                        "image_status": detect_result.get("image_status"),
+                        "result_item": result_item,
+                        "contract_error": detector_error or None,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            raw_vlm_path = raw_vlm_dir / f"{output_name.stem}.json"
             raw_vlm_path.write_text(
                 json.dumps(
                     {"response": raw_response, "text": raw_text, "parsed": parsed},
@@ -492,11 +424,15 @@ def process_images(args: argparse.Namespace) -> None:
             for label in labels:
                 label_counts[label] += 1
             needs_review_count += 1 if parsed["needs_review"] else 0
-            write_yolo_labels(yolo_dir / f"{image_path.stem}.txt", labels, normalized_box)
-            draw_review_image(image_path, review_path, box_xyxy, labels, font_path)
+            write_yolo_labels(yolo_dir / f"{output_name.stem}.txt", labels, normalized_box)
+            if box_xyxy is not None:
+                render_labeled_preview(image_path, review_path, box_xyxy, labels)
+            else:
+                shutil.copy2(image_path, review_path)
 
             annotation = {
-                "image": image_path.name,
+                "image": output_name.name,
+                "source_image": str(image_path),
                 "image_path": str(dataset_image_path),
                 "review_image_path": str(review_path),
                 "preview_image_path": str(preview_path),
@@ -507,9 +443,16 @@ def process_images(args: argparse.Namespace) -> None:
                 "labels": labels,
                 "source_api_labels": source_api_labels,
                 "source_api_object_types": source_api_object_types,
+                "source_detector_confidence": candidate.confidence if candidate else None,
+                "source_detector_metadata": {
+                    **(candidate.detector_metadata if candidate else {}),
+                    "root_status": detect_result.get("root_status"),
+                    "image_status": detect_result.get("image_status"),
+                },
                 "needs_review": parsed["needs_review"],
                 "reason": parsed["reason"],
                 "raw_vlm_path": str(raw_vlm_path),
+                "raw_detector_path": str(raw_detector_path),
             }
             annotations.append(annotation)
             processed += 1
@@ -546,7 +489,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-dir", default="测试数据/teacher-vlm-labels")
     parser.add_argument("--review-dir", default="测试数据/teacher-out")
     parser.add_argument("--preview-dir", default="测试数据/teacher-vlm-preview")
-    parser.add_argument("--detect-url", default="http://127.0.0.1:8881/ImageDetect/teacher/v1.0.0")
+    parser.add_argument("--detect-url", default="http://127.0.0.1:8871/ImageDetect/teacher/v1.0.0")
     parser.add_argument("--ark-url", default="https://ark.cn-beijing.volces.com/api/v3/responses")
     parser.add_argument("--model", default="doubao-seed-2-0-mini-260428")
     parser.add_argument("--api-key-env", default="ARK_API_KEY")

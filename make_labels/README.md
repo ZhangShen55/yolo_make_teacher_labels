@@ -1,10 +1,10 @@
 # make_labels
 
-本子项目用于从视频平台批量采集教师端视频截图，并结合 8881 教师行为接口与 VLM 生成 YOLO 数据集。服务包名为 `app`，可从本目录独立运行。
+本子项目用于从视频平台批量采集教师端视频截图，并结合 ImageDetect 教师行为接口与 VLM 生成 YOLO 数据集。服务包名为 `app`，可从本目录独立运行。
 
 ## 接口迁移记录
 
-新版教师行为接口的类别变化、中文叠框规则、VLM 复核职责和后续测试清单见 [新版教师行为接口迁移契约](docs/teacher-behavior-api-v6-migration.md)。该方案当前仅完成评审和记录，代码仍使用旧版接口映射，尚未切换目标实例。
+新版教师行为接口的类别变化、中文叠框规则、VLM 复核职责和回归测试清单见 [新版教师行为接口迁移契约](docs/teacher-behavior-api-v6-migration.md)。主服务和离线脚本均已按该契约适配。
 
 ## 环境
 
@@ -19,7 +19,9 @@ python -m pip install -r requirements.txt
 
 ## 配置
 
-`config.toml` 保存平台、抽帧、8881、输出目录和 VLM 配置。平台 token 不再需要手工填写到 `.env`，服务会在运行期通过 `[platform.auth]` 自动获取并刷新。
+`config.toml` 保存平台、抽帧、教师检测、输出目录和 VLM 配置。平台 token 不再需要手工填写到 `.env`，服务会在运行期通过 `[platform.auth]` 自动获取并刷新。
+
+教师检测地址配置在 `[algorithm_8881].teacher_detect_url`。该配置节名为兼容既有部署暂时保留，实际端口由 URL 决定；新版目标实例使用 `8871`，公开样例不包含内网地址。
 
 关键敏感配置：
 
@@ -119,6 +121,7 @@ output/
     annotations.jsonl
     classes.txt
     raw/
+    raw_detector/
     preview/
     failed/
 ```
@@ -127,13 +130,15 @@ output/
 
 ## 离线图片脚本
 
-离线图片标注脚本位于 `scripts/teacher_vlm_labeler.py`。它使用 requirements 中声明的 `requests` 调用原有 8881 和 Ark HTTP 接口：
+离线图片标注脚本位于 `scripts/teacher_vlm_labeler.py`。它使用 requirements 中声明的 `requests` 调用新版教师 ImageDetect 和 Ark HTTP 接口：
 
 ```bash
 conda activate make_label
 cd make_labels
 export ARK_API_KEY="your-api-key"
-python -m scripts.teacher_vlm_labeler --src-dir /path/to/images
+python -m scripts.teacher_vlm_labeler \
+  --src-dir /path/to/images \
+  --detect-url http://127.0.0.1:8871/ImageDetect/teacher/v1.0.0
 ```
 
 查看完整参数：

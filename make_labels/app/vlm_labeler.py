@@ -162,7 +162,10 @@ def build_subject_identity_confirm_prompt() -> str:
 
 def build_label_prompt() -> str:
     return (
-        "图片中已用红框标出老师主体，并在框中心标出8881初始中文标签。"
+        "图片中已用红框标出老师主体，并在框上方如实标出 detector 返回的全部中文初检候选标签。"
+        "这些初检候选可能存在误检或漏检，你必须以图片视觉内容为准，对候选行为进行保留、删除或补充，不能照抄文字。"
+        "其中 detector 的 ObjectType=204 表示讲授候选，但只有视觉上确实正在讲授时才保留 teach；"
+        "即使没有 204，只要画面明显在讲授，也可以补充 teach。"
         "请判断最终教师行为标签，只输出JSON。"
         "labels 只能从 sit, stand, bbwriting, teach 中选择。"
         "sit和stand互斥且必须二选一；bbwriting和teach可同时存在。"

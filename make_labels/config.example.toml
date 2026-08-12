@@ -36,7 +36,7 @@ batch_size = 1000
 batch_prefix = "batch_"
 
 [algorithm_8881]
-teacher_detect_url = "http://127.0.0.1:8881/ImageDetect/teacher/v1.0.0"
+teacher_detect_url = "http://127.0.0.1:8871/ImageDetect/teacher/v1.0.0"
 presence_object_type = 100
 min_presence_count = 1
 detect_workers = 8

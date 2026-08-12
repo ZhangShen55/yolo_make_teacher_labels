@@ -100,6 +100,10 @@ def test_subject_identity_prompts_are_non_leading_and_include_scene_rules():
 def test_label_prompt_contains_stricter_teach_and_pose_rules():
     prompt = build_label_prompt()
 
+    assert "框上方" in prompt
+    assert "初检候选" in prompt
+    assert "保留、删除或补充" in prompt
+    assert "204" in prompt
     assert "明显肢体" in prompt
     assert "嘴部" in prompt
     assert "背朝向镜头" in prompt

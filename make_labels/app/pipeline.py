@@ -11,7 +11,13 @@ from PIL import Image
 
 from .config import Settings
 from .dataset_writer import DatasetWriter
-from .detector import TeacherDetectClient, first_data_item, has_teacher_presence, select_teacher_candidate
+from .detector import (
+    DetectContractError,
+    TeacherDetectClient,
+    first_data_item,
+    has_teacher_presence,
+    select_teacher_candidate,
+)
 from .imaging import render_box_preview, render_labeled_preview
 from .job_manager import format_exception_message
 from .logging_utils import redact_url
@@ -226,13 +232,13 @@ class LabelPipeline:
 
     async def label_frame(self, course_id: int, endpoint: VideoEndpoint, offset_second: int, frame_path: Path) -> None:
         image_id = f"{course_id}_{offset_second}"
-        self.status.set_progress("8881_detect", f"正在调用 8881 检测 {image_id}", course_id=course_id, video_url=self.safe_url(endpoint.url))
+        self.status.set_progress("teacher_detect", f"正在调用教师行为检测 {image_id}", course_id=course_id, video_url=self.safe_url(endpoint.url))
         detect_payload = await self.detector.detect_image(str(frame_path), image_id=image_id)
         self.write_raw(course_id, f"{image_id}_detect.json", detect_payload)
         result_item = first_data_item(detect_payload, image_id=image_id)
         if result_item is None:
             self.status.filtered_images += 1
-            logger.info("图片 %s 过滤：8881 无结果", image_id)
+            logger.info("图片 %s 过滤：教师行为检测无结果", image_id)
             frame_path.unlink(missing_ok=True)
             return
         if not has_teacher_presence(
@@ -247,10 +253,17 @@ class LabelPipeline:
 
         with Image.open(frame_path) as image:
             width, height = image.size
-        candidate = select_teacher_candidate(result_item, width=width, height=height)
+        try:
+            candidate = select_teacher_candidate(result_item, width=width, height=height)
+        except DetectContractError as exc:
+            self.status.filtered_images += 1
+            self.status.add_error(f"图片 {image_id} 检测契约不匹配：{exc}")
+            self.discard_frame(frame_path, course_id, "detector_contract_error")
+            return
         if candidate is None:
             self.status.filtered_images += 1
-            logger.info("图片 %s 过滤：未选出老师候选框", image_id)
+            self.status.add_error(f"图片 {image_id} 检测到老师数量但缺少有效主体框")
+            self.discard_frame(frame_path, course_id, "detector_subject_box_missing")
             return
 
         subject_preview_path = self.settings.runtime.tmp_dir / str(course_id) / f"{image_id}_subject.jpg"
@@ -288,6 +301,13 @@ class LabelPipeline:
         vlm_text = await self.vlm.ask_images([preview_path], build_label_prompt())
         vlm_result = parse_vlm_label_response(vlm_text, fallback_labels=candidate.labels)
         self.write_raw(course_id, f"{image_id}_vlm.json", {"response": vlm_text, "parsed": vlm_result.__dict__})
+        labels_conflict = set(candidate.labels) != set(vlm_result.labels)
+        needs_review = candidate.needs_review or vlm_result.needs_review or labels_conflict
+        detector_metadata = {
+            **candidate.detector_metadata,
+            "root_status": detect_payload.get("StatusObject"),
+            "image_status": result_item.get("StatusObject"),
+        }
         write_result = self.writer.write_sample(
             frame_path,
             candidate.box_xyxy,
@@ -296,10 +316,14 @@ class LabelPipeline:
                 "course_id": course_id,
                 "video_url": endpoint.url,
                 "offset_second": offset_second,
+                "source_detector_labels": candidate.labels,
+                "source_detector_object_types": candidate.object_types,
+                "source_detector_confidence": candidate.confidence,
+                "source_detector_metadata": detector_metadata,
                 "source_8881_labels": candidate.labels,
                 "source_8881_object_types": candidate.object_types,
                 "vlm_reason": vlm_result.reason,
-                "needs_review": vlm_result.needs_review,
+                "needs_review": needs_review,
             },
         )
         self.status.current_batch = write_result.batch_dir.name

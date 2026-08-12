@@ -34,6 +34,9 @@ class TeacherCandidate:
     box_xyxy: list[int]
     labels: list[str]
     object_types: list[int]
+    confidence: float | None = None
+    needs_review: bool = False
+    detector_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
