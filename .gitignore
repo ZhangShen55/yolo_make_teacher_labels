@@ -1,0 +1,46 @@
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+.venv/
+venv/
+
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+config.toml
+!config.example.toml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime output
+logs/
+tmp_frames/
+failed/
+*.log
+*.pid
+
+# Classroom datasets and generated output
+/南航收集/
+/安徽师范大学/
+/测试大学/
+/data/
+/datasets/
+/output/
+/outputs/
+
+# Personal workspace and historical local specifications
+/.codex/
+/openspec/

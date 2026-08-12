@@ -1,0 +1,57 @@
+[platform]
+base_url = "https://example.edu.cn"
+course_list_path = "/api/v1/vod"
+vod_detail_path_template = "/api/v1/vod/{course_id}"
+organizations_path = "/api/v1/organizations"
+page_size = 50
+start_page = 1
+max_pages = 0
+begin_time = ""
+end_time = ""
+orga_ids = []
+referer = "https://example.edu.cn/"
+origin = "https://example.edu.cn/"
+
+[platform.auth]
+token_path = "/access_token"
+grant_type = "password"
+client_secret = "replace-with-platform-client-secret"
+client_id = "replace-with-platform-client-id"
+username = "replace-with-platform-username"
+password = "replace-with-platform-password"
+refresh_interval_seconds = 43200
+
+[video]
+teacher_select_probe_second = 1200
+capture_start_second = 300
+capture_interval_second = 1200
+capture_jitter_seconds = 30
+max_frames_per_course = 2
+capture_workers = 8
+command_timeout_seconds = 40
+
+[dataset]
+output_root = "../output"
+batch_size = 1000
+batch_prefix = "batch_"
+
+[algorithm_8881]
+teacher_detect_url = "http://127.0.0.1:8881/ImageDetect/teacher/v1.0.0"
+presence_object_type = 100
+min_presence_count = 1
+detect_workers = 8
+timeout_seconds = 30
+
+[vlm]
+api_url = "https://example.com/api/v3/responses"
+model = "replace-with-vlm-model"
+api_key = "replace-with-vlm-api-key"
+workers = 8
+timeout_seconds = 60
+
+[runtime]
+resume = true
+log_dir = "logs"
+tmp_dir = "tmp_frames"
+failed_dir = "failed"
+log_sensitive_urls = false

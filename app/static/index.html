@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>标注审核工具</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>标注审核工具</h1>
+        <div id="datasetRoot" class="dataset-root"></div>
+      </div>
+      <div class="topbar-actions">
+        <label class="dataset-loader">
+          <span>数据集目录</span>
+          <input id="datasetPathInput" placeholder="输入包含 images/ 和 labels/ 的文件夹路径" />
+          <button id="loadDatasetBtn">加载文件夹</button>
+        </label>
+        <div id="summary" class="summary"></div>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <div class="segmented">
+        <button id="singleModeBtn" class="active">单图精修</button>
+        <button id="batchModeBtn">批量审核</button>
+      </div>
+      <input id="searchInput" placeholder="搜索文件名" />
+      <select id="labelFilter">
+        <option value="">全部标签</option>
+        <option value="sit">sit 坐</option>
+        <option value="stand">stand 站</option>
+        <option value="bbwriting">bbwriting 写板书</option>
+        <option value="teach">teach 讲授演示</option>
+      </select>
+      <select id="reviewFilter">
+        <option value="">全部状态</option>
+        <option value="true">needs_review</option>
+        <option value="false">无需复检</option>
+      </select>
+      <label class="toolbar-field">
+        中间显示
+        <select id="pageSizeSelect">
+          <option value="5">5 张</option>
+          <option value="10" selected>10 张</option>
+          <option value="20">20 张</option>
+          <option value="30">30 张</option>
+          <option value="50">50 张</option>
+        </select>
+      </label>
+      <button id="refreshBtn">刷新</button>
+      <span id="statusText" class="status-text"></span>
+    </section>
+
+    <main id="singleView" class="single-layout">
+      <aside class="image-list-panel">
+        <div class="panel-title list-panel-title">
+          <span>图片列表</span>
+          <div class="list-pager">
+            <button id="listPrevPageBtn" title="上一页">上页</button>
+            <span id="listPageInfo"></span>
+            <button id="listNextPageBtn" title="下一页">下页</button>
+          </div>
+        </div>
+        <div id="imageList" class="image-list"></div>
+      </aside>
+      <section class="canvas-panel">
+        <canvas id="imageCanvas"></canvas>
+      </section>
+      <aside class="inspector">
+        <div class="panel-title">标注面板</div>
+        <div class="field">
+          <label>文件</label>
+          <div id="currentFile" class="mono"></div>
+        </div>
+        <div class="field">
+          <label>姿态</label>
+          <div class="inline-options">
+            <label><input type="radio" name="pose" value="sit" /> sit 坐</label>
+            <label><input type="radio" name="pose" value="stand" /> stand 站</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>行为</label>
+          <div class="inline-options">
+            <label><input id="bbwritingCheck" type="checkbox" value="bbwriting" /> bbwriting 写板书</label>
+            <label><input id="teachCheck" type="checkbox" value="teach" /> teach 讲授演示</label>
+          </div>
+        </div>
+        <div class="bbox-grid">
+          <label>x1<input id="x1Input" type="number" /></label>
+          <label>y1<input id="y1Input" type="number" /></label>
+          <label>x2<input id="x2Input" type="number" /></label>
+          <label>y2<input id="y2Input" type="number" /></label>
+        </div>
+        <div id="normPreview" class="norm-preview"></div>
+        <div class="actions">
+          <button id="saveBtn">保存</button>
+          <button id="saveNextBtn">保存并下一张</button>
+          <button id="rejectBtn" class="danger">移到 rejected</button>
+          <button id="resetBtn">重置</button>
+        </div>
+        <div class="hint">
+          快捷键：←/→ 切换，Ctrl/Cmd+S 保存，Shift+Enter 保存并下一张，Delete 拒收，Esc 重置。
+        </div>
+      </aside>
+    </main>
+
+    <main id="batchView" class="batch-layout hidden">
+      <div id="batchGrid" class="batch-grid"></div>
+      <footer class="pager">
+        <button id="prevPageBtn">上一页</button>
+        <span id="pageInfo"></span>
+        <button id="nextPageBtn">下一页</button>
+      </footer>
+    </main>
+
+    <script src="/app.js?v=20260609-rounded-bbox"></script>
+  </body>
+</html>
