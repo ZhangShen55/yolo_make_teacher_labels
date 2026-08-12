@@ -1,8 +1,8 @@
 import asyncio
 
-from make_label.job_manager import format_exception_message
-from make_label.models import JobStatus
-from make_label.pipeline import LabelPipeline
+from app.job_manager import format_exception_message
+from app.models import JobStatus
+from app.pipeline import LabelPipeline
 
 
 class FakePlatform:

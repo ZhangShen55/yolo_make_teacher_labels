@@ -2,9 +2,9 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from make_label.config import load_settings
-from make_label.main import build_runner_factory, create_app
-from make_label.models import JobStatus, OrganizationItem
+from app.config import load_settings
+from app.main import build_runner_factory, create_app
+from app.models import JobStatus, OrganizationItem
 
 
 CONFIG_TEMPLATE = """

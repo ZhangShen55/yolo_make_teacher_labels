@@ -1,9 +1,4 @@
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-from teacher_vlm_labeler import (  # noqa: E402
+from scripts.teacher_vlm_labeler import (
     LABEL_TO_CLASS_ID,
     normalize_xyxy_to_yolo,
     parse_vlm_labels,

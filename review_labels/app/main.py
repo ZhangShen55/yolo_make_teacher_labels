@@ -8,9 +8,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from label_review.dataset import DatasetStore
-from label_review.review_ops import reject_image, save_annotation
-from label_review.schemas import AnnotationUpdate, DatasetLoadRequest, RejectRequest
+from .dataset import DatasetStore
+from .review_ops import reject_image, save_annotation
+from .schemas import AnnotationUpdate, DatasetLoadRequest, RejectRequest
 
 
 def parse_bool(value: str | None) -> bool | None:

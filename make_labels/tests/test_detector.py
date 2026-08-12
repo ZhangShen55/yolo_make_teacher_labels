@@ -1,4 +1,4 @@
-from make_label.detector import (
+from app.detector import (
     TeacherDetectClient,
     has_teacher_presence,
     image_to_storage_path,
@@ -90,7 +90,7 @@ def test_teacher_detect_client_disables_environment_proxy(monkeypatch, tmp_path)
         async def post(self, url, json):
             return FakeResponse()
 
-    monkeypatch.setattr("make_label.detector.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.detector.httpx.AsyncClient", FakeAsyncClient)
     image_path = tmp_path / "frame.jpg"
     image_path.write_bytes(b"fake-jpeg-bytes")
 

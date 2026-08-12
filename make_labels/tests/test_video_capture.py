@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from make_label.video_capture import VideoCommandError, extract_frame, frame_offsets, run_video_command, should_probe_video
+from app.video_capture import VideoCommandError, extract_frame, frame_offsets, run_video_command, should_probe_video
 
 
 def test_should_probe_video_skips_when_shorter_than_probe_second():
@@ -106,7 +106,7 @@ def test_extract_frame_disables_ffmpeg_stdin(monkeypatch, tmp_path):
         captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("make_label.video_capture.run_video_command", fake_run_video_command)
+    monkeypatch.setattr("app.video_capture.run_video_command", fake_run_video_command)
 
     extract_frame("https://example.com/video.mp4", 120, tmp_path / "frame.jpg")
 

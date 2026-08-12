@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from make_label.config import load_settings
+from app.config import load_settings
 
 
 def write_config(tmp_path: Path, *, platform_auth: str | None = None, vlm_extra: str = 'api_key = "ark-value"') -> Path:

@@ -1,4 +1,4 @@
-from make_label.logging_utils import redact_url
+from app.logging_utils import redact_url
 
 
 def test_redact_url_hides_sensitive_query_values():

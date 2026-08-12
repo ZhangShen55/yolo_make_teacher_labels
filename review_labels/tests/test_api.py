@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from main import create_app
+from app.main import create_app
 
 
 def make_dataset(tmp_path: Path, count: int = 12) -> Path:

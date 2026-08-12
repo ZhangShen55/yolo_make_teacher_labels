@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from make_label.config import PlatformAuthSettings, PlatformSettings
-from make_label.platform_client import PlatformTokenProvider, parse_access_token_payload
+from app.config import PlatformAuthSettings, PlatformSettings
+from app.platform_client import PlatformTokenProvider, parse_access_token_payload
 
 
 def platform_settings(refresh_interval_seconds: int = 3600) -> PlatformSettings:
@@ -84,7 +84,7 @@ def test_first_token_fetch_uses_configured_password_grant(monkeypatch):
             calls.append({"url": url, "params": params, "kwargs": self.kwargs})
             return FakeResponse({"access_token": "token-1"})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
 
     token = asyncio.run(PlatformTokenProvider(platform_settings()).get_token())
 
@@ -122,7 +122,7 @@ def test_cached_token_is_reused_before_refresh_interval(monkeypatch):
             calls.append(params)
             return FakeResponse({"access_token": f"token-{len(calls)}"})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
     provider = PlatformTokenProvider(platform_settings(refresh_interval_seconds=3600), clock=lambda: now[0])
 
     first = asyncio.run(provider.get_token())
@@ -152,7 +152,7 @@ def test_stale_token_refreshes_after_refresh_interval(monkeypatch):
             calls.append(params)
             return FakeResponse({"access_token": f"token-{len(calls)}"})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
     provider = PlatformTokenProvider(platform_settings(refresh_interval_seconds=3600), clock=lambda: now[0])
 
     first = asyncio.run(provider.get_token())
@@ -182,7 +182,7 @@ def test_concurrent_first_requests_share_one_token_refresh(monkeypatch):
             await asyncio.sleep(0)
             return FakeResponse({"access_token": "shared-token"})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
     provider = PlatformTokenProvider(platform_settings())
 
     async def run_requests():

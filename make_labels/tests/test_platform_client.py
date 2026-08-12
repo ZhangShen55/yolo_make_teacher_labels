@@ -2,9 +2,9 @@ import asyncio
 
 import pytest
 
-from make_label.config import PlatformAuthSettings, PlatformSettings
-from make_label.models import CourseRecord, OrganizationItem, VideoEndpoint
-from make_label.platform_client import (
+from app.config import PlatformAuthSettings, PlatformSettings
+from app.models import CourseRecord, OrganizationItem, VideoEndpoint
+from app.platform_client import (
     AuthExpiredError,
     build_platform_headers,
     extract_course_records,
@@ -166,7 +166,7 @@ def test_get_json_uses_dynamic_token_header_without_cookie(monkeypatch):
             calls.append({"url": url, "headers": headers, "params": params})
             return FakeResponse({"ok": True})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(
         PlatformClient(platform_settings(), token_provider=StaticTokenProvider(["jwt-dynamic"])).get_json(
@@ -197,7 +197,7 @@ def test_get_json_includes_optional_cookie(monkeypatch):
             calls.append(headers)
             return FakeResponse({"ok": True})
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(
         PlatformClient(platform_settings(cookie="session=abc"), token_provider=StaticTokenProvider()).get_json(
@@ -229,7 +229,7 @@ def test_get_json_force_refreshes_and_retries_once_on_auth_failure(monkeypatch, 
             return FakeResponse({"ok": True})
 
     token_provider = StaticTokenProvider(["old-token", "new-token"])
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(
         PlatformClient(platform_settings(), token_provider=token_provider).get_json("https://ft.nuaa.edu.cn/api")
@@ -254,7 +254,7 @@ def test_get_json_reports_auth_error_after_refresh_retry_fails(monkeypatch):
         async def get(self, url, headers, params):
             return FakeResponse({"error": "expired"}, status_code=401)
 
-    monkeypatch.setattr("make_label.platform_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.platform_client.httpx.AsyncClient", FakeAsyncClient)
 
     with pytest.raises(AuthExpiredError, match="刷新 token 后仍然失败"):
         asyncio.run(

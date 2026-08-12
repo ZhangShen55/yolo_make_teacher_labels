@@ -1,4 +1,4 @@
-from label_review.yolo import (
+from app.yolo import (
     CLASS_ID_TO_LABEL,
     LABEL_TO_CLASS_ID,
     group_rows_by_box,

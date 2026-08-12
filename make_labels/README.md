@@ -1,12 +1,13 @@
-# make_label
+# make_labels
 
-本项目用于从视频平台批量采集教师端视频截图，并结合 8881 教师行为接口与 doubao-mini 生成 YOLO 数据集。
+本子项目用于从视频平台批量采集教师端视频截图，并结合 8881 教师行为接口与 VLM 生成 YOLO 数据集。服务包名为 `app`，可从本目录独立运行。
 
 ## 环境
 
 ```bash
 conda create -y -n make_label python=3.12
 conda activate make_label
+cd make_labels
 python -m pip install -r requirements.txt
 ```
 
@@ -20,19 +21,19 @@ python -m pip install -r requirements.txt
 
 ```toml
 [platform]
-base_url = "https://mlb.ahnu.edu.cn"
+base_url = "https://example.edu.cn"
 
 [platform.auth]
-token_path = "/cloud-rbac/access_token"
+token_path = "/access_token"
 grant_type = "password"
-client_secret = "平台 client_secret"
-client_id = "jy-system-management-he"
-username = "平台用户名"
-password = "平台密码"
+client_secret = "replace-with-platform-client-secret"
+client_id = "replace-with-platform-client-id"
+username = "replace-with-platform-username"
+password = "replace-with-platform-password"
 refresh_interval_seconds = 43200
 
 [vlm]
-api_key = "火山 Ark API Key"
+api_key = "replace-with-vlm-api-key"
 ```
 
 `grant_type`、`client_secret`、`client_id` 是平台 token 接口参数；`username` 和 `password` 根据不同平台账号填写。`refresh_interval_seconds` 默认 12 小时，平台 API 返回 `401` 或 `403` 时也会强制刷新 token 并重试一次。
@@ -43,10 +44,10 @@ api_key = "火山 Ark API Key"
 
 ```bash
 conda activate make_label
-cd make_label
-python main.py --config config.toml --host 127.0.0.1 --port 8010
+cd make_labels
+python -m app.main --config config.toml --host 127.0.0.1 --port 8010
 
-nohup python -u main.py --config config.toml --host 127.0.0.1 --port 8010 \
+nohup python -u -m app.main --config config.toml --host 127.0.0.1 --port 8010 \
   </dev/null > make_label-service.log 2>&1 &
 
 echo $! > make_label-service.pid
@@ -74,7 +75,7 @@ curl -X POST http://127.0.0.1:8010/api/jobs/start
 ```bash
 curl -X POST http://127.0.0.1:8010/api/jobs/start \
   -H 'Content-Type: application/json' \
-  -d '{"start_page": 150, "max_pages": 100}'
+  -d '{"start_page": 150, "max_pages": 1}'
 ```
 
 其中 `start_page` 表示课程列表页码，`max_pages` 表示本次最多处理多少页。
@@ -104,10 +105,10 @@ curl http://127.0.0.1:8010/api/preflight
 
 ## 输出
 
-默认输出到 `../南航收集`：
+脱敏样例配置默认输出到 `../output`：
 
 ```text
-南航收集/
+output/
   batch_000001/
     images/
     labels/
@@ -119,6 +120,32 @@ curl http://127.0.0.1:8010/api/preflight
 ```
 
 `images/` 和 `labels/` 可直接用当前标注审核工具打开。
+
+## 离线图片脚本
+
+离线图片标注脚本位于 `scripts/teacher_vlm_labeler.py`。它使用 requirements 中声明的 `requests` 调用原有 8881 和 Ark HTTP 接口：
+
+```bash
+conda activate make_label
+cd make_labels
+export ARK_API_KEY="your-api-key"
+python -m scripts.teacher_vlm_labeler --src-dir /path/to/images
+```
+
+查看完整参数：
+
+```bash
+python -m scripts.teacher_vlm_labeler --help
+```
+
+## 测试
+
+从本子项目目录运行：
+
+```bash
+conda run -n make_label python -m pytest tests -q
+python -m app.main --help
+```
 
 ## 第一版限制
 

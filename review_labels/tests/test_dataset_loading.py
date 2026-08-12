@@ -5,8 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from label_review.dataset import DatasetStore
-from main import create_app
+from app.dataset import DatasetStore
+from app.main import create_app
 
 
 def make_dataset(root: Path, count: int = 2) -> Path:

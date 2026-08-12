@@ -1,6 +1,6 @@
 from PIL import Image
 
-from make_label.imaging import render_box_preview
+from app.imaging import render_box_preview
 
 
 def test_render_box_preview_draws_without_label_text(tmp_path):

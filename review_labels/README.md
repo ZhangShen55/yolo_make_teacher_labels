@@ -2,6 +2,19 @@
 
 本项目是本地 Web 标注审核工具，用于查看、修改和拒收 YOLO 格式教师行为标注。
 
+项目可从当前目录独立安装、启动和测试：
+
+```text
+review_labels/
+  app/
+    __init__.py
+    main.py
+    static/
+  tests/
+  requirements.txt
+  README.md
+```
+
 ## 环境
 
 ```bash
@@ -12,12 +25,12 @@ python -m pip install -r requirements.txt
 
 ## 启动
 
-在 `app/` 目录下启动：
+在 `review_labels/` 项目根目录启动：
 
 ```bash
 conda activate label_review
-cd app
-python main.py --dataset ../测试数据/teacher-vlm-labels
+cd review_labels
+python -m app.main --dataset /path/to/dataset
 ```
 
 打开：
@@ -78,8 +91,8 @@ teach
 
 ## 测试
 
-在仓库根目录运行：
+在 `review_labels/` 项目根目录运行：
 
 ```bash
-conda run -n label_review python -m pytest app/tests -q
+conda run -n label_review python -m pytest tests -q
 ```

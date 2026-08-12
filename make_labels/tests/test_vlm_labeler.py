@@ -1,4 +1,4 @@
-from make_label.vlm_labeler import (
+from app.vlm_labeler import (
     build_label_prompt,
     build_subject_identity_confirm_prompt,
     build_subject_identity_prompt,

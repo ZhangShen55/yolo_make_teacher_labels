@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from make_label.dataset_writer import DatasetWriter, yolo_text_for_box
+from app.dataset_writer import DatasetWriter, yolo_text_for_box
 
 
 def test_yolo_text_for_multilabel_box_uses_fixed_class_order():

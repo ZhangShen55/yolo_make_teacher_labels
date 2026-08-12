@@ -3,8 +3,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from label_review.dataset import DatasetStore
-from label_review.review_ops import reject_image, save_annotation
+from app.dataset import DatasetStore
+from app.review_ops import reject_image, save_annotation
 
 
 def make_dataset(tmp_path: Path) -> Path:
