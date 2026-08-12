@@ -112,4 +112,4 @@ Run: `cd make_labels && conda run -n make_label python -m pytest tests/test_dete
 
 - [x] **Step 4: 运行两项目完整测试、CLI、编译和安全扫描**
 
-- [ ] **Step 5: 中文 Conventional Commit 并推送 `main`**
+- [x] **Step 5: 中文 Conventional Commit 并推送 `main`**
