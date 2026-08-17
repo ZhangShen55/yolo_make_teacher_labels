@@ -1,10 +1,13 @@
 import asyncio
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+import app.preflight as preflight_module
 from app.config import load_settings
 from app.main import build_runner_factory, create_app
 from app.models import JobStatus, OrganizationItem
+from app.preflight import PreflightRunner
 
 
 CONFIG_TEMPLATE = """
@@ -29,8 +32,8 @@ password = "secret-password"
 teacher_detect_url = "http://127.0.0.1:8881/ImageDetect/teacher/v1.0.0"
 
 [vlm]
-api_url = "https://ark.cn-beijing.volces.com/api/v3/responses"
-model = "doubao-seed-2-0-mini-260428"
+api_url = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model = "doubao-seed-2.0-mini"
 api_key = "ark-value"
 
 [runtime]
@@ -203,3 +206,45 @@ def test_preflight_run_endpoint_uses_runner(tmp_path):
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert response.json()["checks"][0]["name"] == "platform_auth"
+
+
+def test_preflight_vlm_uses_shared_sdk_client(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    settings = load_settings(config_path)
+    captured = {}
+
+    class FakeArkVlmClient:
+        def __init__(self, api_url, api_key, model, timeout_seconds):
+            captured["init"] = (api_url, api_key, model, timeout_seconds)
+
+        async def ask_images(self, image_paths, prompt):
+            captured["request"] = (image_paths, prompt)
+            return "ok"
+
+        async def close(self):
+            captured["closed"] = True
+
+    class ForbiddenAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("VLM preflight must not call httpx directly")
+
+    monkeypatch.setattr(preflight_module, "ArkVlmClient", FakeArkVlmClient)
+    monkeypatch.setattr(
+        preflight_module,
+        "httpx",
+        SimpleNamespace(AsyncClient=ForbiddenAsyncClient),
+        raising=False,
+    )
+
+    result = asyncio.run(PreflightRunner(settings).check_vlm())
+
+    assert result == {"name": "vlm", "ok": True, "detail": "doubao-seed-2.0-mini"}
+    assert captured["init"] == (
+        "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "ark-value",
+        "doubao-seed-2.0-mini",
+        60,
+    )
+    assert captured["request"] == ([], "请只回复 ok")
+    assert captured["closed"] is True

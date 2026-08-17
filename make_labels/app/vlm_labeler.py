@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-import httpx
+from openai import AsyncOpenAI
 
 from .models import SubjectIdentityResult, TeacherStreamChoice, TeacherStreamConfirmResult, VlmLabelResult
 
@@ -191,24 +191,45 @@ def image_to_data_url(path: Path) -> str:
 class ArkVlmClient:
     def __init__(self, api_url: str, api_key: str, model: str, timeout_seconds: int = 60):
         self.api_url = api_url
-        self.api_key = api_key
         self.model = model
-        self.timeout_seconds = timeout_seconds
+        self.client = AsyncOpenAI(
+            base_url=api_url,
+            api_key=api_key,
+            timeout=timeout_seconds,
+        )
 
     async def ask_images(self, image_paths: list[Path], prompt: str) -> str:
+        _, response_text = await self.ask_images_with_raw(image_paths, prompt)
+        return response_text
+
+    async def close(self) -> None:
+        await self.client.close()
+
+    async def ask_images_with_raw(
+        self,
+        image_paths: list[Path],
+        prompt: str,
+    ) -> tuple[dict[str, Any], str]:
         content: list[dict[str, Any]] = [
             {"type": "input_image", "image_url": image_to_data_url(path)} for path in image_paths
         ]
         content.append({"type": "input_text", "text": prompt})
-        payload = {"model": self.model, "input": [{"role": "user", "content": content}]}
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(self.api_url, headers=headers, json=payload)
-        response.raise_for_status()
-        return extract_response_text(response.json())
+        response = await self.client.responses.create(
+            model=self.model,
+            input=[{"role": "user", "content": content}],
+        )
+        return response.model_dump(), extract_response_text(response)
 
 
-def extract_response_text(payload: dict[str, Any]) -> str:
+def extract_response_text(payload: Any) -> str:
+    output_text = getattr(payload, "output_text", None)
+    if isinstance(output_text, str) and output_text:
+        return output_text
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump()
+    if not isinstance(payload, dict):
+        return str(payload)
+
     texts: list[str] = []
     for item in payload.get("output") or []:
         for content in item.get("content") or []:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -23,6 +24,7 @@ from app.detector import (
     validate_detect_response,
 )
 from app.imaging import build_display_text, render_labeled_preview
+from app.vlm_labeler import ArkVlmClient
 
 
 LABEL_TO_CLASS_ID = {"sit": 0, "stand": 1, "bbwriting": 2, "teach": 3}
@@ -116,22 +118,6 @@ def image_to_data_url(path: Path) -> str:
     suffix = path.suffix.lower()
     mime = "image/png" if suffix == ".png" else "image/jpeg"
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
-
-
-def post_json_with_retries(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: int = 90) -> dict[str, Any]:
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-            if response.status_code == 200:
-                return response.json()
-            last_error = RuntimeError(
-                f"HTTP {response.status_code}: {sanitized_response_body(response.text)}"
-            )
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-        time.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"POST failed after retries: {last_error}")
 
 
 def post_detect_json_with_retries(
@@ -256,42 +242,28 @@ def build_vlm_prompt(source_api_labels: list[str]) -> str:
 """.strip()
 
 
-def extract_responses_text(payload: dict[str, Any]) -> str:
-    if isinstance(payload.get("output_text"), str):
-        return payload["output_text"]
-    chunks: list[str] = []
-    for output_item in payload.get("output") or []:
-        for content in output_item.get("content") or []:
-            text = content.get("text")
-            if isinstance(text, str):
-                chunks.append(text)
-    if chunks:
-        return "\n".join(chunks)
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def call_vlm(
+async def call_vlm(
     preview_path: Path,
     source_api_labels: list[str],
     ark_url: str,
     model: str,
     api_key: str,
+    client: ArkVlmClient | None = None,
 ) -> tuple[dict[str, Any], str]:
-    payload = {
-        "model": model,
-        "input": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_image", "image_url": image_to_data_url(preview_path)},
-                    {"type": "input_text", "text": build_vlm_prompt(source_api_labels)},
-                ],
-            }
-        ],
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    response_json = post_json_with_retries(ark_url, payload, headers=headers, timeout=120)
-    return response_json, extract_responses_text(response_json)
+    active_client = client or ArkVlmClient(
+        ark_url,
+        api_key=api_key,
+        model=model,
+        timeout_seconds=120,
+    )
+    try:
+        return await active_client.ask_images_with_raw(
+            [preview_path],
+            build_vlm_prompt(source_api_labels),
+        )
+    finally:
+        if client is None:
+            await active_client.close()
 
 
 def write_yolo_labels(path: Path, labels: list[str], normalized_box: list[float] | None) -> None:
@@ -307,6 +279,32 @@ def write_yolo_labels(path: Path, labels: list[str], normalized_box: list[float]
 
 
 def process_images(args: argparse.Namespace) -> None:
+    api_key = os.environ.get(args.api_key_env)
+    if not api_key:
+        raise RuntimeError(f"Missing API key env var: {args.api_key_env}")
+
+    vlm_runner = asyncio.Runner()
+    vlm_client = ArkVlmClient(
+        args.ark_url,
+        api_key=api_key,
+        model=args.model,
+        timeout_seconds=120,
+    )
+    try:
+        _process_images(args, api_key, vlm_runner, vlm_client)
+    finally:
+        try:
+            vlm_runner.run(vlm_client.close())
+        finally:
+            vlm_runner.close()
+
+
+def _process_images(
+    args: argparse.Namespace,
+    api_key: str,
+    vlm_runner: asyncio.Runner,
+    vlm_client: ArkVlmClient,
+) -> None:
     src_dir = Path(args.src_dir)
     dataset_dir = Path(args.dataset_dir)
     review_dir = Path(args.review_dir)
@@ -334,10 +332,6 @@ def process_images(args: argparse.Namespace) -> None:
     ]:
         directory.mkdir(parents=True, exist_ok=True)
     classes_path.write_text("\n".join(LABEL_ORDER) + "\n", encoding="utf-8")
-
-    api_key = os.environ.get(args.api_key_env)
-    if not api_key:
-        raise RuntimeError(f"Missing API key env var: {args.api_key_env}")
 
     image_paths = sorted(
         path for path in src_dir.iterdir()
@@ -388,7 +382,16 @@ def process_images(args: argparse.Namespace) -> None:
                 raw_text = ""
             else:
                 render_labeled_preview(image_path, preview_path, box_xyxy, source_api_labels)
-                raw_response, raw_text = call_vlm(preview_path, source_api_labels, args.ark_url, args.model, api_key)
+                raw_response, raw_text = vlm_runner.run(
+                    call_vlm(
+                        preview_path,
+                        source_api_labels,
+                        args.ark_url,
+                        args.model,
+                        api_key,
+                        client=vlm_client,
+                    )
+                )
                 parsed = parse_vlm_labels(raw_text, source_api_labels)
                 parsed["needs_review"] = (
                     parsed["needs_review"]
@@ -490,8 +493,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--review-dir", default="测试数据/teacher-out")
     parser.add_argument("--preview-dir", default="测试数据/teacher-vlm-preview")
     parser.add_argument("--detect-url", default="http://127.0.0.1:8871/ImageDetect/teacher/v1.0.0")
-    parser.add_argument("--ark-url", default="https://ark.cn-beijing.volces.com/api/v3/responses")
-    parser.add_argument("--model", default="doubao-seed-2-0-mini-260428")
+    parser.add_argument("--ark-url", default="https://ark.cn-beijing.volces.com/api/plan/v3")
+    parser.add_argument("--model", default="doubao-seed-2.0-mini")
     parser.add_argument("--api-key-env", default="ARK_API_KEY")
     parser.add_argument("--detect-batch-size", type=int, default=4)
     parser.add_argument("--limit", type=int, default=0)

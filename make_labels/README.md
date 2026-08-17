@@ -39,8 +39,12 @@ password = "replace-with-platform-password"
 refresh_interval_seconds = 43200
 
 [vlm]
+api_url = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model = "doubao-seed-2.0-mini"
 api_key = "replace-with-vlm-api-key"
 ```
+
+`api_url` 是 OpenAI SDK 的 `base_url`，SDK 会在其后调用 Responses API；不要在配置中再追加 `/responses`。主服务、运行自检和离线图片脚本共用同一个 OpenAI SDK 客户端。
 
 `grant_type`、`client_secret`、`client_id` 是平台 token 接口参数；`username` 和 `password` 根据不同平台账号填写。`refresh_interval_seconds` 默认 12 小时，平台 API 返回 `401` 或 `403` 时也会强制刷新 token 并重试一次。
 
@@ -130,7 +134,7 @@ output/
 
 ## 离线图片脚本
 
-离线图片标注脚本位于 `scripts/teacher_vlm_labeler.py`。它使用 requirements 中声明的 `requests` 调用新版教师 ImageDetect 和 Ark HTTP 接口：
+离线图片标注脚本位于 `scripts/teacher_vlm_labeler.py`。教师 ImageDetect 仍使用 requirements 中声明的 `requests`，VLM 则通过 `openai` SDK 调用 Ark OpenAI-compatible Responses API：
 
 ```bash
 conda activate make_label

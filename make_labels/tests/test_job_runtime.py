@@ -54,11 +54,19 @@ def test_pipeline_run_uses_start_page_override_without_touching_config():
         {"platform": type("Platform", (), {"start_page": 1, "max_pages": 0})()},
     )()
     pipeline.platform = FakePlatform()
+    closed = []
+
+    class FakeVlm:
+        async def close(self):
+            closed.append(True)
+
+    pipeline.vlm = FakeVlm()
 
     asyncio.run(pipeline.run(start_page=5, max_pages=1))
 
     assert pipeline.platform.pages == [5]
     assert pipeline.status.current_page == 5
+    assert closed == [True]
 
 
 def test_label_frame_writes_v6_subject_box_and_detector_metadata(tmp_path):

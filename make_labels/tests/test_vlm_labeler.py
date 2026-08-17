@@ -1,4 +1,10 @@
+import asyncio
+
+from PIL import Image
+
+import app.vlm_labeler as vlm_labeler
 from app.vlm_labeler import (
+    ArkVlmClient,
     build_label_prompt,
     build_subject_identity_confirm_prompt,
     build_subject_identity_prompt,
@@ -9,6 +15,61 @@ from app.vlm_labeler import (
     parse_teacher_stream_confirm_response,
     parse_vlm_label_response,
 )
+
+
+def test_ark_vlm_client_uses_openai_responses_api_and_serializes_response(monkeypatch, tmp_path):
+    image_path = tmp_path / "teacher.jpg"
+    Image.new("RGB", (4, 4), "white").save(image_path)
+    captured = {}
+
+    class FakeResponse:
+        output_text = '{"labels":["stand","teach"]}'
+
+        def model_dump(self):
+            return {"id": "response-id", "output_text": self.output_text}
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            captured["request"] = kwargs
+            return FakeResponse()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+            self.responses = FakeResponses()
+
+        async def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(vlm_labeler, "AsyncOpenAI", FakeAsyncOpenAI, raising=False)
+    client = ArkVlmClient(
+        "https://ark.example/api/plan/v3",
+        api_key="secret-value",
+        model="doubao-seed-2.0-mini",
+        timeout_seconds=45,
+    )
+
+    raw_response, response_text = asyncio.run(
+        client.ask_images_with_raw([image_path], "判断教师行为")
+    )
+    asyncio.run(client.close())
+
+    assert captured["client"] == {
+        "base_url": "https://ark.example/api/plan/v3",
+        "api_key": "secret-value",
+        "timeout": 45,
+    }
+    assert captured["request"]["model"] == "doubao-seed-2.0-mini"
+    content = captured["request"]["input"][0]["content"]
+    assert content[0]["type"] == "input_image"
+    assert content[0]["image_url"].startswith("data:image/jpeg;base64,")
+    assert content[1] == {"type": "input_text", "text": "判断教师行为"}
+    assert response_text == '{"labels":["stand","teach"]}'
+    assert raw_response == {
+        "id": "response-id",
+        "output_text": '{"labels":["stand","teach"]}',
+    }
+    assert captured["closed"] is True
 
 
 def test_parse_teacher_stream_choice_accepts_json_index():

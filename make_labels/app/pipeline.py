@@ -71,36 +71,39 @@ class LabelPipeline:
         max_pages: int | None = None,
         course_filters: dict[str, Any] | None = None,
     ) -> None:
-        page = start_page or self.settings.platform.start_page
-        page_limit = max_pages if max_pages is not None else self.settings.platform.max_pages
-        pages_seen = 0
-        filters = course_filters or {}
-        logger.info("任务开始 start_page=%s max_pages=%s filters=%s", page, page_limit or "unlimited", filters)
-        while not self.status.stop_requested:
-            if page_limit and pages_seen >= page_limit:
-                break
-            self.status.current_page = page
-            self.status.set_progress("fetch_course_page", f"正在获取课程列表第 {page} 页")
-            try:
-                courses = await self.platform.fetch_course_records(page, filters=filters)
-            except AuthExpiredError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                self.status.add_error(f"课程列表第{page}页失败：{exc}")
-                break
-            if not courses:
-                logger.info("课程列表第 %s 页为空，任务结束", page)
-                break
-            logger.info("课程列表第 %s 页获取到 %s 节课", page, len(courses))
-            for course in courses:
-                if self.status.stop_requested:
+        try:
+            page = start_page or self.settings.platform.start_page
+            page_limit = max_pages if max_pages is not None else self.settings.platform.max_pages
+            pages_seen = 0
+            filters = course_filters or {}
+            logger.info("任务开始 start_page=%s max_pages=%s filters=%s", page, page_limit or "unlimited", filters)
+            while not self.status.stop_requested:
+                if page_limit and pages_seen >= page_limit:
                     break
-                await self.process_course(course)
-                self.status.processed_courses += 1
-            page += 1
-            pages_seen += 1
-        self.status.set_progress("idle", "任务已结束")
-        logger.info("任务结束 processed=%s skipped=%s labeled=%s", self.status.processed_courses, self.status.skipped_courses, self.status.labeled_images)
+                self.status.current_page = page
+                self.status.set_progress("fetch_course_page", f"正在获取课程列表第 {page} 页")
+                try:
+                    courses = await self.platform.fetch_course_records(page, filters=filters)
+                except AuthExpiredError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    self.status.add_error(f"课程列表第{page}页失败：{exc}")
+                    break
+                if not courses:
+                    logger.info("课程列表第 %s 页为空，任务结束", page)
+                    break
+                logger.info("课程列表第 %s 页获取到 %s 节课", page, len(courses))
+                for course in courses:
+                    if self.status.stop_requested:
+                        break
+                    await self.process_course(course)
+                    self.status.processed_courses += 1
+                page += 1
+                pages_seen += 1
+            self.status.set_progress("idle", "任务已结束")
+            logger.info("任务结束 processed=%s skipped=%s labeled=%s", self.status.processed_courses, self.status.skipped_courses, self.status.labeled_images)
+        finally:
+            await self.vlm.close()
 
     async def process_course(self, course: CourseRecord | int) -> None:
         if isinstance(course, int):

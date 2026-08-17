@@ -1,10 +1,14 @@
+import asyncio
+
 import requests
 import pytest
 
+import scripts.teacher_vlm_labeler as teacher_vlm_labeler
 from app.detector import DetectContractError, DetectResponseError
 from scripts.teacher_vlm_labeler import (
     LABEL_TO_CLASS_ID,
     build_output_names,
+    call_vlm,
     detect_teacher_batch,
     normalize_xyxy_to_yolo,
     parse_vlm_labels,
@@ -12,6 +16,79 @@ from scripts.teacher_vlm_labeler import (
     select_candidate_for_offline,
     select_teacher_candidate,
 )
+
+
+def test_call_vlm_reuses_shared_openai_sdk_client(monkeypatch, tmp_path):
+    preview_path = tmp_path / "preview.jpg"
+    preview_path.write_bytes(b"preview")
+    captured = {}
+
+    class FakeArkVlmClient:
+        def __init__(self, api_url, api_key, model, timeout_seconds):
+            captured["init"] = (api_url, api_key, model, timeout_seconds)
+
+        async def ask_images_with_raw(self, image_paths, prompt):
+            captured["request"] = (image_paths, prompt)
+            return {"id": "response-id"}, '{"labels":["stand","teach"]}'
+
+        async def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr("scripts.teacher_vlm_labeler.ArkVlmClient", FakeArkVlmClient, raising=False)
+
+    raw_response, response_text = asyncio.run(
+        call_vlm(
+            preview_path,
+            ["stand", "teach"],
+            "https://ark.example/api/plan/v3",
+            "doubao-seed-2.0-mini",
+            "secret-value",
+        )
+    )
+
+    assert captured["init"] == (
+        "https://ark.example/api/plan/v3",
+        "secret-value",
+        "doubao-seed-2.0-mini",
+        120,
+    )
+    assert captured["request"][0] == [preview_path]
+    assert "站立 | 讲授" in captured["request"][1]
+    assert raw_response == {"id": "response-id"}
+    assert response_text == '{"labels":["stand","teach"]}'
+    assert captured["closed"] is True
+    assert not hasattr(teacher_vlm_labeler, "post_json_with_retries")
+
+
+def test_call_vlm_keeps_injected_shared_client_open(tmp_path):
+    preview_path = tmp_path / "preview.jpg"
+    preview_path.write_bytes(b"preview")
+    captured = {"closed": False}
+
+    class FakeSharedClient:
+        async def ask_images_with_raw(self, image_paths, prompt):
+            captured["request"] = (image_paths, prompt)
+            return {"id": "shared-response"}, "{}"
+
+        async def close(self):
+            captured["closed"] = True
+
+    shared_client = FakeSharedClient()
+
+    result = asyncio.run(
+        call_vlm(
+            preview_path,
+            ["stand"],
+            "https://unused.example/v3",
+            "unused-model",
+            "unused-key",
+            client=shared_client,
+        )
+    )
+
+    assert result == ({"id": "shared-response"}, "{}")
+    assert captured["request"][0] == [preview_path]
+    assert captured["closed"] is False
 
 
 def test_select_teacher_candidate_uses_shared_v6_subject_and_behavior_contract():

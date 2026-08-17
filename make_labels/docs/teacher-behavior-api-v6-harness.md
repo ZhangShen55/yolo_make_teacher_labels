@@ -2,7 +2,7 @@
 
 ## 记录信息
 
-- 验证日期：2026-08-12（Asia/Shanghai）
+- 验证日期：2026-08-12；OpenAI SDK 补充验证日期：2026-08-17（Asia/Shanghai）
 - 被验证提交：`abda118a682ee29307668d0498f2ca002c39d21f`
 - 接口路由：`POST /ImageDetect/teacher/v1.0.0`
 - 目标部署：本地忽略配置中的 `8871` 实例；本文不记录内网主机
@@ -34,7 +34,7 @@ conda run -n label_review python -m app.main --help
 
 | 项目 | 结果 |
 | --- | --- |
-| `make_labels` 测试 | `106 passed` |
+| `make_labels` 测试 | `110 passed` |
 | `review_labels` 测试 | `21 passed` |
 | 两项目 `compileall` | 通过 |
 | 两项目 `pip check` | `No broken requirements found` |
@@ -89,6 +89,30 @@ conda run -n label_review python -m app.main --help
 
 结论：真实实例返回结构与 v6 契约一致；`100` 提供唯一主体框，`202` 和 `204` 分别解析为“站立”和“讲授”，置信度位于框对象，空行为框可为 `null`，未出现旧 `205`。
 
+## OpenAI SDK VLM Smoke Harness
+
+2026-08-17 将主服务、运行自检和离线脚本的 VLM 请求统一迁移到 `openai==3.1.0`。`[vlm].api_url` 现在作为 OpenAI SDK 的 `base_url` 使用，SDK 通过 Responses API 发起请求；验证使用以下非敏感配置：
+
+```toml
+[vlm]
+api_url = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model = "doubao-seed-2.0-mini"
+```
+
+真实 smoke 使用一张 Git 忽略的 `1920x1080` 课堂 JPEG。流程先调用新版 ImageDetect，按 `ObjectType=100` 主体框和全部中文候选标签生成预览图，再将预览图交给 VLM 复核。脱敏结果：
+
+```json
+{
+  "sdk_call": "ok",
+  "model": "doubao-seed-2.0-mini",
+  "detector_labels": ["stand", "teach"],
+  "vlm_labels": ["stand", "teach"],
+  "needs_review": false
+}
+```
+
+调用过程中未输出或保存 API key、图片 Base64 和完整 VLM 原始响应。SDK 客户端在预检、主任务和离线批处理结束时均确定性关闭，离线批处理在单一事件循环内复用连接。该 smoke 证明用户指定的 Ark base URL、模型和 API key 可由 OpenAI SDK 正常完成图像 Responses 请求，并能进入现有标签解析链路。
+
 ## 视觉 Harness
 
 使用真实 smoke 结果生成 VLM 预览图并人工检查：
@@ -105,8 +129,8 @@ conda run -n label_review python -m app.main --help
 - `make_labels/config.toml` 由 Git 忽略，只在本地保存真实目标地址和凭据。
 - Harness 不保存原始图片、Base64、完整响应或带认证参数的视频 URL。
 - 提交前对 staged diff 扫描内网主机、长 Base64 和真实凭据模式，未命中。
-- VLM 的保留、删除、补充和最终 YOLO 写盘由自动化测试覆盖；本次真实 smoke 不声明 Ark 端到端联调。
+- VLM 的保留、删除、补充和最终 YOLO 写盘由自动化测试覆盖；OpenAI SDK 到 Ark 的真实图像调用已完成脱敏 smoke。
 
 ## 最终判定
 
-新版教师行为接口适配通过自动化、真实 ImageDetect smoke、中文预览视觉检查和安全扫描，可以用于后续标签制作。实际生成的数据仍应根据 `needs_review` 进入人工审核流程。
+新版教师行为接口适配通过自动化、真实 ImageDetect smoke、OpenAI SDK VLM smoke、中文预览视觉检查和安全扫描，可以用于后续标签制作。实际生成的数据仍应根据 `needs_review` 进入人工审核流程。

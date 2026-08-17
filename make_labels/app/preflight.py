@@ -5,12 +5,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import httpx
 from PIL import Image
 
 from .config import Settings
 from .detector import TeacherDetectClient
 from .platform_client import PlatformClient
+from .vlm_labeler import ArkVlmClient
 
 
 class PreflightRunner:
@@ -67,23 +67,16 @@ class PreflightRunner:
             return {"name": "algorithm_8881", "ok": False, "detail": str(exc)}
 
     async def check_vlm(self) -> dict[str, Any]:
-        payload = {
-            "model": self.settings.vlm.model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "请只回复 ok"}],
-                }
-            ],
-        }
-        headers = {
-            "Authorization": f"Bearer {self.settings.vlm.api_key}",
-            "Content-Type": "application/json",
-        }
+        client = ArkVlmClient(
+            self.settings.vlm.api_url,
+            api_key=self.settings.vlm.api_key,
+            model=self.settings.vlm.model,
+            timeout_seconds=self.settings.vlm.timeout_seconds,
+        )
         try:
-            async with httpx.AsyncClient(timeout=self.settings.vlm.timeout_seconds) as client:
-                response = await client.post(self.settings.vlm.api_url, headers=headers, json=payload)
-            response.raise_for_status()
+            await client.ask_images([], "请只回复 ok")
             return {"name": "vlm", "ok": True, "detail": self.settings.vlm.model}
         except Exception as exc:  # noqa: BLE001
             return {"name": "vlm", "ok": False, "detail": str(exc)}
+        finally:
+            await client.close()

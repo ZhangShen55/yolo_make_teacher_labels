@@ -43,8 +43,8 @@ detect_workers = 8
 timeout_seconds = 30
 
 [vlm]
-api_url = "https://example.com/api/v3/responses"
-model = "replace-with-vlm-model"
+api_url = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model = "doubao-seed-2.0-mini"
 api_key = "replace-with-vlm-api-key"
 workers = 8
 timeout_seconds = 60
