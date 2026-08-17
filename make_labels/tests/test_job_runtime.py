@@ -69,6 +69,70 @@ def test_pipeline_run_uses_start_page_override_without_touching_config():
     assert closed == [True]
 
 
+def test_pipeline_course_tmp_dir_is_isolated_by_run_id(tmp_path):
+    first = object.__new__(LabelPipeline)
+    first.settings = SimpleNamespace(runtime=SimpleNamespace(tmp_dir=tmp_path))
+    first.run_id = "run-a"
+    second = object.__new__(LabelPipeline)
+    second.settings = first.settings
+    second.run_id = "run-b"
+
+    assert first.course_tmp_dir(950783) == tmp_path / "run-a" / "950783"
+    assert second.course_tmp_dir(950783) == tmp_path / "run-b" / "950783"
+
+
+def test_label_frame_filters_missing_extracted_file_before_detector(tmp_path):
+    class ForbiddenDetector:
+        async def detect_image(self, image_path, image_id):
+            raise AssertionError("detector must not receive a missing frame")
+
+    pipeline = object.__new__(LabelPipeline)
+    pipeline.status = JobStatus()
+    pipeline.detector = ForbiddenDetector()
+    missing_path = tmp_path / "frame_1482.jpg"
+
+    asyncio.run(
+        pipeline.label_frame(
+            950783,
+            VideoEndpoint(course_id=950783, url="https://example.com/video.mp4"),
+            1482,
+            missing_path,
+        )
+    )
+
+    assert pipeline.status.filtered_images == 1
+    assert any("抽帧文件不存在" in error for error in pipeline.status.recent_errors)
+
+
+def test_label_frame_filters_file_removed_during_detector_read(tmp_path):
+    frame_path = tmp_path / "frame_1482.jpg"
+    Image.new("RGB", (4, 4), "white").save(frame_path)
+
+    class RemovingDetector:
+        async def detect_image(self, image_path, image_id):
+            Path(image_path).unlink()
+            raise FileNotFoundError(image_path)
+
+    pipeline = object.__new__(LabelPipeline)
+    pipeline.status = JobStatus()
+    pipeline.detector = RemovingDetector()
+    pipeline.settings = SimpleNamespace(
+        runtime=SimpleNamespace(log_sensitive_urls=False),
+    )
+
+    asyncio.run(
+        pipeline.label_frame(
+            950783,
+            VideoEndpoint(course_id=950783, url="https://example.com/video.mp4"),
+            1482,
+            frame_path,
+        )
+    )
+
+    assert pipeline.status.filtered_images == 1
+    assert any("检测读取前丢失" in error for error in pipeline.status.recent_errors)
+
+
 def test_label_frame_writes_v6_subject_box_and_detector_metadata(tmp_path):
     frame_path = tmp_path / "frame.jpg"
     Image.new("RGB", (640, 360), "white").save(frame_path)
@@ -131,6 +195,7 @@ def test_label_frame_writes_v6_subject_box_and_detector_metadata(tmp_path):
 
     pipeline = object.__new__(LabelPipeline)
     pipeline.status = JobStatus()
+    pipeline.run_id = "test-run"
     pipeline.detector = FakeDetector()
     pipeline.vlm = FakeVlm()
     pipeline.writer = FakeWriter()
@@ -185,6 +250,7 @@ def test_label_frame_moves_missing_subject_box_to_failed(tmp_path):
 
     pipeline = object.__new__(LabelPipeline)
     pipeline.status = JobStatus()
+    pipeline.run_id = "test-run"
     pipeline.detector = FakeDetector()
     pipeline.settings = SimpleNamespace(
         algorithm_8881=SimpleNamespace(presence_object_type=100, min_presence_count=1),

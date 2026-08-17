@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import shutil
 from typing import Any
+from uuid import uuid4
 
 from PIL import Image
 
@@ -45,6 +46,7 @@ class LabelPipeline:
     def __init__(self, settings: Settings, status: JobStatus):
         self.settings = settings
         self.status = status
+        self.run_id = uuid4().hex
         self.platform = PlatformClient(settings.platform)
         self.detector = TeacherDetectClient(
             settings.algorithm_8881.teacher_detect_url,
@@ -64,6 +66,9 @@ class LabelPipeline:
 
     def safe_url(self, url: str) -> str:
         return redact_url(url, enabled=not self.settings.runtime.log_sensitive_urls)
+
+    def course_tmp_dir(self, course_id: int) -> Path:
+        return self.settings.runtime.tmp_dir / self.run_id / str(course_id)
 
     async def run(
         self,
@@ -140,7 +145,7 @@ class LabelPipeline:
     async def select_teacher_endpoint(self, course_id: int, endpoints: list[VideoEndpoint]) -> VideoEndpoint | None:
         probe_paths = []
         probe_second = self.settings.video.teacher_select_probe_second
-        course_tmp = self.settings.runtime.tmp_dir / str(course_id)
+        course_tmp = self.course_tmp_dir(course_id)
         timeout_seconds = self.settings.video.command_timeout_seconds
         for index, endpoint in enumerate(endpoints, start=1):
             safe_url = self.safe_url(endpoint.url)
@@ -206,7 +211,7 @@ class LabelPipeline:
             for offset in offsets:
                 if self.status.stop_requested:
                     break
-                frame_path = self.settings.runtime.tmp_dir / str(course_id) / f"frame_{offset}.jpg"
+                frame_path = self.course_tmp_dir(course_id) / f"frame_{offset}.jpg"
                 self.status.set_progress(
                     "extract_frame",
                     f"正在抽取课程 {course_id} offset={offset}",
@@ -235,8 +240,23 @@ class LabelPipeline:
 
     async def label_frame(self, course_id: int, endpoint: VideoEndpoint, offset_second: int, frame_path: Path) -> None:
         image_id = f"{course_id}_{offset_second}"
+        try:
+            frame_available = frame_path.is_file() and frame_path.stat().st_size > 0
+        except OSError:
+            frame_available = False
+        if not frame_available:
+            self.status.filtered_images += 1
+            self.status.add_error(f"图片 {image_id} 抽帧文件不存在或为空：{frame_path}")
+            logger.warning("图片 %s 过滤：抽帧文件不存在或为空 path=%s", image_id, frame_path)
+            return
         self.status.set_progress("teacher_detect", f"正在调用教师行为检测 {image_id}", course_id=course_id, video_url=self.safe_url(endpoint.url))
-        detect_payload = await self.detector.detect_image(str(frame_path), image_id=image_id)
+        try:
+            detect_payload = await self.detector.detect_image(str(frame_path), image_id=image_id)
+        except FileNotFoundError:
+            self.status.filtered_images += 1
+            self.status.add_error(f"图片 {image_id} 抽帧文件在检测读取前丢失：{frame_path}")
+            logger.warning("图片 %s 过滤：抽帧文件在检测读取前丢失 path=%s", image_id, frame_path)
+            return
         self.write_raw(course_id, f"{image_id}_detect.json", detect_payload)
         result_item = first_data_item(detect_payload, image_id=image_id)
         if result_item is None:
@@ -269,7 +289,7 @@ class LabelPipeline:
             self.discard_frame(frame_path, course_id, "detector_subject_box_missing")
             return
 
-        subject_preview_path = self.settings.runtime.tmp_dir / str(course_id) / f"{image_id}_subject.jpg"
+        subject_preview_path = self.course_tmp_dir(course_id) / f"{image_id}_subject.jpg"
         render_box_preview(frame_path, subject_preview_path, candidate.box_xyxy)
         self.status.set_progress("vlm_subject_identity", f"正在判断红框主体身份 {image_id}", course_id=course_id)
         subject_text = await self.vlm.ask_images([subject_preview_path], build_subject_identity_prompt())
@@ -298,7 +318,7 @@ class LabelPipeline:
                 logger.info("图片 %s 过滤：主体 student", image_id)
                 return
 
-        preview_path = self.settings.runtime.tmp_dir / str(course_id) / f"{image_id}_preview.jpg"
+        preview_path = self.course_tmp_dir(course_id) / f"{image_id}_preview.jpg"
         render_labeled_preview(frame_path, preview_path, candidate.box_xyxy, candidate.labels)
         self.status.set_progress("vlm_label", f"正在 VLM 标注 {image_id}", course_id=course_id)
         vlm_text = await self.vlm.ask_images([preview_path], build_label_prompt())

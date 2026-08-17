@@ -5,6 +5,8 @@ import random
 import subprocess
 import time
 
+from PIL import Image
+
 
 class VideoCommandError(RuntimeError):
     pass
@@ -99,7 +101,25 @@ def ffprobe_duration(video_url: str, *, timeout_seconds: float | None = 60) -> f
     return float(result.stdout.strip())
 
 
-def extract_frame(video_url: str, offset_second: int, out_path: Path, *, timeout_seconds: float | None = 60) -> Path:
+def validate_frame_output(out_path: Path) -> None:
+    if not out_path.is_file() or out_path.stat().st_size == 0:
+        raise VideoCommandError(f"ffmpeg output frame is missing or empty: {out_path}")
+    try:
+        with Image.open(out_path) as image:
+            image.load()
+    except (OSError, ValueError) as exc:
+        raise VideoCommandError(f"ffmpeg output frame is not a valid image: {out_path}") from exc
+
+
+def extract_frame(
+    video_url: str,
+    offset_second: int,
+    out_path: Path,
+    *,
+    timeout_seconds: float | None = 60,
+    retries: int = 2,
+    retry_delay_seconds: float = 1.0,
+) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
         "ffmpeg",
@@ -115,8 +135,25 @@ def extract_frame(video_url: str, offset_second: int, out_path: Path, *, timeout
         "1",
         "-q:v",
         "2",
+        "-update",
+        "1",
         "-y",
         str(out_path),
     ]
-    run_video_command(command, timeout_seconds=timeout_seconds)
-    return out_path
+    attempts = retries + 1
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            out_path.unlink(missing_ok=True)
+            run_video_command(command, retries=0, timeout_seconds=timeout_seconds)
+            validate_frame_output(out_path)
+            return out_path
+        except (OSError, VideoCommandError) as exc:
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(retry_delay_seconds)
+
+    raise VideoCommandError(
+        f"ffmpeg failed after {attempts} attempts: output frame was not created or invalid: "
+        f"{out_path}; last error: {last_error}"
+    ) from last_error

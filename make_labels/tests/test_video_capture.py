@@ -1,6 +1,7 @@
 import subprocess
 
 import pytest
+from PIL import Image
 
 from app.video_capture import VideoCommandError, extract_frame, frame_offsets, run_video_command, should_probe_video
 
@@ -104,6 +105,7 @@ def test_extract_frame_disables_ffmpeg_stdin(monkeypatch, tmp_path):
     def fake_run_video_command(command, **kwargs):
         captured["command"] = command
         captured["kwargs"] = kwargs
+        Image.new("RGB", (4, 4), "white").save(command[-1])
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr("app.video_capture.run_video_command", fake_run_video_command)
@@ -112,3 +114,78 @@ def test_extract_frame_disables_ffmpeg_stdin(monkeypatch, tmp_path):
 
     assert "-nostdin" in captured["command"]
     assert captured["kwargs"]["timeout_seconds"] == 60
+    assert captured["kwargs"]["retries"] == 0
+
+
+def test_extract_frame_retries_when_ffmpeg_returns_zero_without_output(monkeypatch, tmp_path):
+    calls = []
+    out_path = tmp_path / "frame.jpg"
+
+    def fake_run_video_command(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 3:
+            Image.new("RGB", (4, 4), "white").save(out_path)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="output file is empty")
+
+    monkeypatch.setattr("app.video_capture.run_video_command", fake_run_video_command)
+
+    result = extract_frame(
+        "https://example.com/video.mp4",
+        1482,
+        out_path,
+        retries=2,
+        retry_delay_seconds=0,
+    )
+
+    assert result == out_path
+    assert len(calls) == 3
+    assert out_path.stat().st_size > 0
+
+
+def test_extract_frame_rejects_invalid_image_after_three_attempts(monkeypatch, tmp_path):
+    calls = []
+    out_path = tmp_path / "frame.jpg"
+
+    def fake_run_video_command(command, **kwargs):
+        calls.append(command)
+        out_path.write_bytes(b"not-a-jpeg")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("app.video_capture.run_video_command", fake_run_video_command)
+
+    with pytest.raises(VideoCommandError, match="output frame"):
+        extract_frame(
+            "https://example.com/video.mp4",
+            1482,
+            out_path,
+            retries=2,
+            retry_delay_seconds=0,
+        )
+
+    assert len(calls) == 3
+
+
+def test_extract_frame_rejects_truncated_jpeg_that_verify_accepts(monkeypatch, tmp_path):
+    calls = []
+    complete_path = tmp_path / "complete.jpg"
+    out_path = tmp_path / "frame.jpg"
+    Image.new("RGB", (32, 32), "white").save(complete_path)
+    truncated_bytes = complete_path.read_bytes()[:-1]
+
+    def fake_run_video_command(command, **kwargs):
+        calls.append(command)
+        out_path.write_bytes(truncated_bytes)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("app.video_capture.run_video_command", fake_run_video_command)
+
+    with pytest.raises(VideoCommandError, match="output frame"):
+        extract_frame(
+            "https://example.com/video.mp4",
+            1482,
+            out_path,
+            retries=2,
+            retry_delay_seconds=0,
+        )
+
+    assert len(calls) == 3

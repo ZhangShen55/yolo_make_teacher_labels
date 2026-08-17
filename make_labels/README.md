@@ -17,6 +17,8 @@ python -m pip install -r requirements.txt
 
 本机还需要可执行的 `ffmpeg` 和 `ffprobe`，用于远程视频抽帧与读取视频时长。
 
+抽帧成功不仅要求 ffmpeg 退出码为 `0`，还要求输出文件存在、非空并能被 Pillow 验证。无产物或无效图片会在同一抽帧点最多尝试三次，全部失败后记录 `VideoCommandError`，不会将不存在的文件交给 ImageDetect。每次任务使用独立的 `tmp_frames/<run_id>/<course_id>/` 临时目录，避免 Windows 上多个服务实例处理相同课程时互相覆盖或移动帧文件。
+
 ## 配置
 
 `config.toml` 保存平台、抽帧、教师检测、输出目录和 VLM 配置。平台 token 不再需要手工填写到 `.env`，服务会在运行期通过 `[platform.auth]` 自动获取并刷新。
