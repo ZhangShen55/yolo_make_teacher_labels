@@ -45,7 +45,14 @@ def test_summary_and_batch_pagination(tmp_path):
 
     summary = client.get("/api/dataset/summary").json()
     assert summary["active"] == 12
-    assert summary["label_counts"] == {"sit": 0, "stand": 12, "bbwriting": 0, "teach": 12}
+    assert summary["label_counts"] == {
+        "sit": 0,
+        "stand": 12,
+        "bbwriting": 0,
+        "teach": 12,
+        "usephone": 0,
+        "mic": 0,
+    }
 
     page1 = client.get("/api/images/batch?page=1&page_size=10").json()
     page2 = client.get("/api/images/batch?page=2&page_size=10").json()
@@ -90,3 +97,51 @@ def test_patch_annotation_accepts_fractional_bbox_pixels(tmp_path):
     assert response.status_code == 200
     assert response.json()["boxes"][0]["box_xyxy"] == [900, 500, 1101, 901]
     assert (root / "labels/frame_000001.txt").read_text(encoding="utf-8").startswith("1 ")
+
+
+def test_new_behavior_labels_are_read_filtered_counted_and_saved(tmp_path):
+    root = make_dataset(tmp_path, count=1)
+    (root / "classes.txt").unlink()
+    (root / "labels/frame_000001.txt").write_text(
+        "1 0.520833 0.671296 0.127083 0.314815\n"
+        "4 0.520833 0.671296 0.127083 0.314815\n"
+        "5 0.520833 0.671296 0.127083 0.314815\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(root))
+
+    summary = client.get("/api/dataset/summary").json()
+    assert summary["label_counts"] == {
+        "sit": 0,
+        "stand": 1,
+        "bbwriting": 0,
+        "teach": 0,
+        "usephone": 1,
+        "mic": 1,
+    }
+    detail = client.get("/api/images/frame_000001").json()
+    assert detail["boxes"][0]["labels"] == ["stand", "usephone", "mic"]
+    assert [item["image_id"] for item in client.get("/api/images?label=usephone").json()["items"]] == [
+        "frame_000001"
+    ]
+
+    response = client.patch(
+        "/api/images/frame_000001/annotation",
+        json={
+            "boxes": [
+                {
+                    "box_id": "0",
+                    "box_xyxy": [900, 500, 1100, 900],
+                    "labels": ["mic", "stand", "usephone"],
+                }
+            ],
+            "needs_review": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["labels"] == ["stand", "usephone", "mic"]
+    assert (root / "labels/frame_000001.txt").read_text(encoding="utf-8") == (
+        "1 0.520833 0.648148 0.104167 0.370370\n"
+        "4 0.520833 0.648148 0.104167 0.370370\n"
+        "5 0.520833 0.648148 0.104167 0.370370\n"
+    )

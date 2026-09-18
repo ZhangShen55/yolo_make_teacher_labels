@@ -55,6 +55,24 @@ def test_save_annotation_updates_yolo_and_jsonl(tmp_path):
     assert (root / "backups").exists()
 
 
+def test_save_annotation_persists_phone_and_microphone_classes(tmp_path):
+    root = make_dataset(tmp_path)
+    store = DatasetStore(root)
+
+    saved = save_annotation(
+        store,
+        "frame_000001",
+        [{"box_id": "0", "box_xyxy": [900, 500, 1100, 900], "labels": ["stand", "usephone", "mic"]}],
+    )
+
+    assert saved["labels"] == ["stand", "usephone", "mic"]
+    assert (root / "labels/frame_000001.txt").read_text(encoding="utf-8") == (
+        "1 0.520833 0.648148 0.104167 0.370370\n"
+        "4 0.520833 0.648148 0.104167 0.370370\n"
+        "5 0.520833 0.648148 0.104167 0.370370\n"
+    )
+
+
 def test_reject_image_moves_files_and_removes_active_annotation(tmp_path):
     root = make_dataset(tmp_path)
     store = DatasetStore(root)

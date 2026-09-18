@@ -3,9 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-LABEL_TO_CLASS_ID = {"sit": 0, "stand": 1, "bbwriting": 2, "teach": 3}
+LABEL_TO_CLASS_ID = {
+    "sit": 0,
+    "stand": 1,
+    "bbwriting": 2,
+    "teach": 3,
+    "usephone": 4,
+    "mic": 5,
+}
 CLASS_ID_TO_LABEL = {value: key for key, value in LABEL_TO_CLASS_ID.items()}
-LABEL_ORDER = ["sit", "stand", "bbwriting", "teach"]
+LABEL_ORDER = ["sit", "stand", "bbwriting", "teach", "usephone", "mic"]
 
 
 @dataclass(frozen=True)

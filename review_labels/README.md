@@ -67,18 +67,34 @@ dataset_root/
 
 ## 标签规则
 
-类别顺序固定：
+类别顺序固定（YOLO class id -> label）：
+
+```text
+0 sit 坐
+1 stand 站
+2 bbwriting 写板书
+3 teach 讲授演示
+4 usephone 使用手机
+5 mic 手持麦克风
+```
+
+新数据集的 `classes.txt` 内容应按相同顺序填写标签名（不包含数字和中文说明）：
 
 ```text
 sit
 stand
 bbwriting
 teach
+usephone
+mic
 ```
 
 - `sit` 和 `stand` 必须且只能选择一个。
-- `bbwriting` 和 `teach` 可以独立选择，也可以同时存在。
+- `bbwriting`、`teach`、`usephone` 和 `mic` 可以独立选择，也可以与姿态及其他行为同时存在。
 - 同一个 bbox 多标签时，YOLO txt 写多行相同坐标。
+- 新数据集的 `classes.txt` 建议按上述六行顺序维护；审核工具以内部固定映射为准，即使历史数据只有四行或没有 `classes.txt` 也可以加载。
+- `4` 和 `5` 是本审核工具的 YOLO class id，不代表 ImageDetect 的 `ObjectType` 编号。
+- 本项目的六类审核契约不改变 `make_labels` 的自动检测、VLM 判定或标签生成逻辑。
 
 ## 功能
 

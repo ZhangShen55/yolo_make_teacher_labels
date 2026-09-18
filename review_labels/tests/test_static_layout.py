@@ -65,3 +65,19 @@ def test_bbox_coordinates_are_rounded_before_save():
 
     assert "app.js?v=20260609-rounded-bbox" in html
     assert "Math.round(Math.max" in js
+
+
+def test_new_behavior_labels_are_available_in_single_batch_and_filter_controls():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert '<option value="usephone">usephone 使用手机</option>' in html
+    assert '<option value="mic">mic 手持麦克风</option>' in html
+    assert 'id="usephoneCheck"' in html
+    assert 'id="micCheck"' in html
+    assert 'value="usephone"' in js
+    assert 'value="mic"' in js
+    assert "usephoneCheck" in js
+    assert "micCheck" in js
+    assert 'input[value="usephone"]' in js
+    assert 'input[value="mic"]' in js

@@ -3,6 +3,8 @@ const LABEL_TEXT = {
   stand: "stand 站",
   bbwriting: "bbwriting 写板书",
   teach: "teach 讲授演示",
+  usephone: "usephone 使用手机",
+  mic: "mic 手持麦克风",
 };
 
 const state = {
@@ -35,8 +37,12 @@ function labelsFromControls(prefix = "") {
   if (pose) labels.push(pose);
   const bb = document.querySelector(`${prefix} input[value="bbwriting"]`);
   const teach = document.querySelector(`${prefix} input[value="teach"]`);
+  const usephone = document.querySelector(`${prefix} input[value="usephone"]`);
+  const mic = document.querySelector(`${prefix} input[value="mic"]`);
   if (bb?.checked) labels.push("bbwriting");
   if (teach?.checked) labels.push("teach");
+  if (usephone?.checked) labels.push("usephone");
+  if (mic?.checked) labels.push("mic");
   return labels;
 }
 
@@ -97,7 +103,17 @@ async function loadSummary() {
   if (document.activeElement !== el.datasetPathInput) {
     el.datasetPathInput.value = summary.dataset_root;
   }
-  el.summary.textContent = `total ${summary.total} | active ${summary.active} | rejected ${summary.rejected} | stand ${summary.label_counts.stand} | teach ${summary.label_counts.teach}`;
+  el.summary.textContent = [
+    `total ${summary.total}`,
+    `active ${summary.active}`,
+    `rejected ${summary.rejected}`,
+    `sit ${summary.label_counts.sit}`,
+    `stand ${summary.label_counts.stand}`,
+    `bbwriting ${summary.label_counts.bbwriting}`,
+    `teach ${summary.label_counts.teach}`,
+    `usephone ${summary.label_counts.usephone}`,
+    `mic ${summary.label_counts.mic}`,
+  ].join(" | ");
 }
 
 async function loadDatasetFromInput() {
@@ -191,6 +207,8 @@ function updateInspector() {
   });
   el.bbwritingCheck.checked = labels.includes("bbwriting");
   el.teachCheck.checked = labels.includes("teach");
+  el.usephoneCheck.checked = labels.includes("usephone");
+  el.micCheck.checked = labels.includes("mic");
   const [x1, y1, x2, y2] = box.box_xyxy;
   el.x1Input.value = x1;
   el.y1Input.value = y1;
@@ -409,6 +427,8 @@ function batchCard(item) {
       <label><input type="radio" name="${item.image_id}pose" value="stand" ${labels.includes("stand") ? "checked" : ""}> stand 站</label>
       <label><input type="checkbox" value="bbwriting" ${labels.includes("bbwriting") ? "checked" : ""}> bbwriting 写板书</label>
       <label><input type="checkbox" value="teach" ${labels.includes("teach") ? "checked" : ""}> teach 讲授演示</label>
+      <label><input type="checkbox" value="usephone" ${labels.includes("usephone") ? "checked" : ""}> usephone 使用手机</label>
+      <label><input type="checkbox" value="mic" ${labels.includes("mic") ? "checked" : ""}> mic 手持麦克风</label>
       <div class="batch-actions">
         <button data-action="save">保存</button>
         <button data-action="detail">精修</button>
@@ -467,6 +487,8 @@ function labelsFromBatchCard(card, imageId) {
   if (pose) labels.push(pose);
   if (card.querySelector('input[value="bbwriting"]').checked) labels.push("bbwriting");
   if (card.querySelector('input[value="teach"]').checked) labels.push("teach");
+  if (card.querySelector('input[value="usephone"]').checked) labels.push("usephone");
+  if (card.querySelector('input[value="mic"]').checked) labels.push("mic");
   return labels;
 }
 
@@ -528,7 +550,7 @@ function bindEvents() {
     state.page += 1;
     await loadBatch();
   };
-  [el.x1Input, el.y1Input, el.x2Input, el.y2Input, el.bbwritingCheck, el.teachCheck].forEach(input => {
+  [el.x1Input, el.y1Input, el.x2Input, el.y2Input, el.bbwritingCheck, el.teachCheck, el.usephoneCheck, el.micCheck].forEach(input => {
     input.onchange = syncBoxFromInputs;
   });
   document.querySelectorAll('input[name="pose"]').forEach(input => {
@@ -558,7 +580,7 @@ function bindEvents() {
 function collectElements() {
   for (const id of [
     "datasetRoot", "summary", "statusText", "imageList", "imageCanvas", "currentFile",
-    "bbwritingCheck", "teachCheck", "x1Input", "y1Input", "x2Input", "y2Input",
+    "bbwritingCheck", "teachCheck", "usephoneCheck", "micCheck", "x1Input", "y1Input", "x2Input", "y2Input",
     "normPreview", "saveBtn", "saveNextBtn", "rejectBtn", "resetBtn", "singleModeBtn",
     "batchModeBtn", "singleView", "batchView", "batchGrid", "prevPageBtn", "nextPageBtn",
     "pageInfo", "searchInput", "labelFilter", "reviewFilter", "refreshBtn",
