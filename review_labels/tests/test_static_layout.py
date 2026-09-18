@@ -63,7 +63,7 @@ def test_bbox_coordinates_are_rounded_before_save():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
-    assert "app.js?v=20260609-rounded-bbox" in html
+    assert "app.js?v=20260918-label-taxonomy" in html
     assert "Math.round(Math.max" in js
 
 
