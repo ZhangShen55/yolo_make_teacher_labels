@@ -36,7 +36,7 @@ python -m app.main --dataset /path/to/dataset
 打开：
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:18000
 ```
 
 ## 数据集结构
